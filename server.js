@@ -8,14 +8,12 @@ let server = net.createServer((client) => {
 
   client.setEncoding("utf-8");
 
-  client.write("Digite seu nickname com o comando !nick SEU_NICKNAME\n");
 
   let buffer = "";
 
   client.on("data", (data) => {
     buffer += data.toString();
-
-    if (buffer.includes("\n")) {
+    
       let message = buffer.trim();
       buffer = "";
 
@@ -25,10 +23,10 @@ let server = net.createServer((client) => {
         client.write("Conexão encerrada. Nickname obrigatório!");
         client.end();
       }
-    }
   });
 
   const tratarComandos = (data) => {
+    const usuariosConectados = listaUsuariosConectados.map(usuario => usuario.nickname);
     let comando = String(data).split(" ")[0];
     let valor = String(data).split(comando)[1];
     switch (comando) {
@@ -36,99 +34,103 @@ let server = net.createServer((client) => {
         client.nickname = valor;
         client.id = idsUsuarios++;
         listaUsuariosConectados.push(client);
-        client.write(`Seu nickname foi definido como ${client.nickname}!\n`);
+        mensagensGlobais(
+          "!nick",
+          client.nickname,
+          client.id,
+          usuariosConectados
+        );
         console.log(
           `Usuário ID ${client.id} - nickname ${client.nickname} logou!\n`
         );
-        mensagensGlobais("novo_usuario", client.nickname, client.id);
-        mensagensGlobais("lista_usuarios");
         break;
       case "!users":
-        mensagensGlobais("lista_usuarios");
+        client.write(`!users ${JSON.stringify(usuariosConectados)}\n`);
         break;
       case "!sendmsg":
-        mensagensGlobais("nova_mensagem", client.nickname, client.id, valor);
+        mensagensGlobais(
+          "!msg",
+          client.nickname,
+          client.id,
+          valor
+        );
+        break;
       case "!poke":
         const nicknameUsuarioCutucado = valor;
         if (isUsuarioNaSala(nicknameUsuarioCutucado)) {
-          client.write(`Você cutucou ${nicknameUsuarioCutucado}`);
+          client.write(`!poke ${client.nickname} ${nicknameUsuarioCutucado}`);
           mensagensGlobais(
-            "cutucada",
+            "!poke",
             client.nickname,
             client.id,
             nicknameUsuarioCutucado
           );
-        } else {
-          client.write("O usuário não está na sala!");
-        }
+        } 
+        break;
+      case "!changenickname":
+        const resultado = handleMudarNickname(client.nickname, valor, client);
+          mensagensGlobais(
+            "!changenickname",
+            resultado.nickAntigo,
+            client.id,
+            resultado.nickNovo
+          );
         break;
       case "!help":
         client.write(
           `### LISTA DE COMANDOS: ### \n !changenickname NICK_ATUAL NOVO_NICK - altera o seu nickname  \n !poke nickname - Cutuca um usuário logado na sala \n !sendmsg MENSAGEM - envia uma mensagem na sala \n !users - Lista os usuários logados na sala`
         );
         break;
-      default:
-        if (client.nickname) {
-          client.write(
-            "Comando inválido. Digite !help para consultar a lista de comandos!"
-          );
-        }
     }
   };
 
-  const mensagensGlobais = (comando, nickname, idUsuario, mensagem) => {
+  const mensagensGlobais = (comando, nickAntigo, idUsuario, mensagem) => {
+    const usuariosConectados = listaUsuariosConectados.map(usuario => usuario.nickname);
     let msg = "";
     switch (comando) {
-      case "novo_usuario":
-        msg = `${nickname} entrou na sala!\n`;
+      case "!nick":
+      case "!users":
+        msg = `!users ${listaUsuariosConectados.length} ${usuariosConectados.join(" ")}\n`;
         break;
-      case "lista_usuarios":
-        msg = `Usuários conectados: ${JSON.stringify(
-          listaUsuariosConectados.map((user) => user.nickname)
-        )}\n`;
+      case "!msg":
+        msg = `!msg ${nickAntigo} ${mensagem}`;
         break;
-      case "nova_mensagem":
-        msg = `${nickname}: ${mensagem}\n`;
+      case "!poke":
+        msg = `!poke ${nickAntigo} ${mensagem}`;
         break;
-      case "cutucada":
-        msg = `${nickname} cutucou ${mensagem}`;
+      case "!changenickname":
+        msg = `!changenickname ${nickAntigo} alterou seu nickname para ${mensagem}`;
         break;
     }
     for (const usuario of listaUsuariosConectados) {
-      if (usuario.id === idUsuario && comando !== "nova_mensagem") {
-        continue;
-      } else if (comando == "cutucada" && client.nickname == mensagem) {
-        usuario.write(`${nickname} cutucou voce!`);
+      if (usuario.write) { 
+        usuario.write(msg);
       }
-      usuario.write(msg);
     }
   };
 
   const handleMudarNickname = (nickAntigo, novoNick, client) => {
-    const usuarioComNickNameNovo = listaUsuariosConectados.find(
-      (usuario) => usuario.nickname === novoNick
-    );
-    if(usuarioComNickNameNovo) {
-      return "Já tem um usuário utilizando este nickname!";
-    }
-    const novaListaUsuarios = listaUsuariosConectados.filter((usuario) => usuario.nickname !== nickAntigo);
-    novaListaUsuarios = [
-      ...novaListaUsuarios,
-      {
-        ...client,
-        id: usuarioComNickNameNovo.id,
-        nickname: novoNick
-      }
-    ] 
-  }
+
+    client.nickname = novoNick;
+    return { nickAntigo, nickNovo: novoNick };
+  };
+  
   const isUsuarioNaSala = (nickname) => {
     return listaUsuariosConectados.some(
-      (usuario) => usuario.nickname === usuario.nickname
+      (usuario) => usuario.nickname === nickname
     );
   };
+  
 
   client.on("end", () => {
-    console.log(`Um cliente sem nickname foi desconectado!`);
+    console.log(`Cliente desconectado: ${client.nickname || 'sem nickname'}`);
+    listaUsuariosConectados = listaUsuariosConectados.filter(
+      (c) => c !== client
+    );
+  });
+
+  client.on("error", (err) => {
+    console.error("Erro no cliente:", err.message);
     listaUsuariosConectados = listaUsuariosConectados.filter(
       (c) => c !== client
     );
